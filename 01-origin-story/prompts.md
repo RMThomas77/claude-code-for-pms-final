@@ -24,6 +24,12 @@ prompt library built from your own questions.
 
 ### 1.
 
+What were the 3 defect fixes pushed with 4.2
+
 ### 2.
 
+Can you pull the September data to see if volume has resolved?
+
 ### 3.
+
+What does Priya mean by "don't let it eat month one"
