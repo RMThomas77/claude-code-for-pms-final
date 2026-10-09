@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rook Dispatch: the two fixes (prototype)</title>
+<style>
+  :root { --ink:#1d2433; --mute:#6b7488; --line:#dde1ea; --bg:#f4f6fa; --card:#fff;
+          --brand:#2f4ea2; --vesper:#c2410c; --vbg:#fff4ec; --good:#15803d; --bad:#b91c1c; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.45 system-ui,Segoe UI,Arial,sans-serif; color:var(--ink); background:var(--bg); }
+  header { background:var(--ink); color:#fff; padding:12px 24px; display:flex; gap:24px; align-items:center; }
+  header b { font-size:17px; letter-spacing:.3px; }
+  header span { color:#aab3c7; font-size:13px; }
+  .note { background:#fff8db; border-bottom:1px solid #ecd98a; padding:8px 24px; font-size:13px; }
+  main { max-width:1080px; margin:20px auto; padding:0 16px; display:grid; grid-template-columns:1fr; gap:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  h2 { margin:0 0 10px; font-size:14px; text-transform:uppercase; letter-spacing:.6px; color:var(--mute); }
+  h2.sp { margin-top:16px; }
+  label.opt { display:flex; gap:10px; align-items:flex-start; padding:8px 10px; border:1px solid var(--line);
+              border-radius:8px; margin-bottom:6px; cursor:pointer; }
+  label.opt:has(input:checked) { border-color:var(--brand); background:#eef2fc; }
+  label.opt small { display:block; color:var(--mute); }
+  input[type=range] { width:100%; }
+  .weekval { font-size:22px; font-weight:700; }
+  select { font:inherit; font-size:13px; padding:4px; border:1px solid var(--line); border-radius:6px; }
+  button.mini { padding:3px 8px; font-size:12px; }
+  .row { display:grid; grid-template-columns:30px 140px 1fr 60px 70px 70px 130px; gap:10px; align-items:center;
+         padding:10px 8px; border-bottom:1px solid var(--line); transition:background .2s; }
+  .row.head { font-size:12px; color:var(--mute); text-transform:uppercase; border-bottom:2px solid var(--line); }
+  .row.vesper { background:var(--vbg); border-left:4px solid var(--vesper); }
+  .rank { font-weight:700; color:var(--mute); }
+  .bar { height:10px; background:#e8ebf3; border-radius:5px; overflow:hidden; }
+  .bar i { display:block; height:100%; background:var(--brand); transition:width .3s; }
+  .row.vesper .bar i { background:var(--vesper); }
+  .pill { font-size:12px; padding:2px 8px; border-radius:99px; background:#e8ebf3; text-align:center; }
+  .row.asking { background:#eef2fc; }
+  .row.vesper.asking { background:#ffe7d4; }
+  button { font:inherit; padding:9px 16px; border-radius:8px; border:1px solid var(--brand);
+           background:var(--brand); color:#fff; cursor:pointer; }
+  button.ghost { background:#fff; color:var(--brand); }
+  button:hover { filter:brightness(1.08); }
+  button:disabled { opacity:.5; cursor:default; }
+  #log { margin:10px 0 0; padding:0; list-style:none; font-size:13px; max-height:170px; overflow:auto; }
+  #log li { padding:4px 0; border-bottom:1px dashed var(--line); }
+  .taken { color:var(--good); font-weight:600; } .no { color:var(--bad); }
+  .summary { margin-top:12px; padding:10px 12px; border-radius:8px; background:var(--vbg); font-size:14px; }
+  svg { width:100%; height:160px; display:block; }
+  .legend { font-size:12px; color:var(--mute); display:flex; gap:16px; flex-wrap:wrap; }
+  .legend b { display:inline-block; width:14px; height:3px; vertical-align:middle; margin-right:4px; }
+  .full { grid-column:1 / -1; }
+  .controls { display:grid; grid-template-columns:1.6fr 1fr 1fr auto; gap:24px; align-items:start; }
+  @media (max-width:900px){ .controls{ grid-template-columns:1fr; } }
+  .twocol { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:820px){ .twocol{ grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<header><b>Rook Dispatch</b><span>Console &rsaquo; Callouts &rsaquo; Old Town &rsaquo; Who gets pinged</span></header>
+<div class="note"><b>Prototype, not live data.</b> The state is today's: 60s wait, 4.2 weights (0.60 / 0.25 / 0.15), Vesper already sunk. Each responder's outcome mix is the real post-4.2 mix from the <code>pings</code> table. Proximity and starting scores are assumptions (the database holds neither), so read the ranking as an illustration of the mechanism.</div>
+
+<main>
+  <section class="card full">
+    <div class="controls">
+      <div>
+        <h2>The two fixes</h2>
+        <label class="opt"><input type="checkbox" id="fix1">
+          <span><b>Fix 1.</b> A missed ping stops counting as a refusal<small>Today a miss costs 0.12, same as a turn-down.</small></span></label>
+        <label class="opt"><input type="checkbox" id="fix2">
+          <span><b>Fix 2.</b> A score eases back when someone wasn't offered work<small>Toward 0.5 each week if pinged fewer than 3 times.</small></span></label>
+      </div>
+      <div>
+        <h2>Recovery speed</h2>
+        <div class="weekval">+<span id="rateLabel">0.15</span> <span style="font-size:14px;font-weight:400">a week</span></div>
+        <input type="range" id="rate" min="0.05" max="0.50" step="0.05" value="0.15" aria-label="Recovery speed per week">
+        <small style="color:var(--mute)">Was +0.05. Only applies when Fix 2 is ticked.</small>
+      </div>
+      <div>
+        <h2>Weeks after the fixes ship</h2>
+        <div class="weekval"><span id="weekLabel">0</span></div>
+        <input type="range" id="week" min="0" max="8" value="0" aria-label="Weeks after the fixes ship">
+        <small style="color:var(--mute)">Week 0 is today: 60s wait, 4.2 weights, Vesper already sunk.</small>
+      </div>
+      <div style="display:flex;align-items:flex-start">
+        <button id="resetAll">Reset everything</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card full">
+    <h2>Next Old Town callout: who is asked, in order</h2>
+    <div class="row head"><span>#</span><span>Responder</span><span>Routing score</span><span>Recent acc.</span><span>Pings / week</span><span>Sent so far</span><span>When asked</span></div>
+    <div id="list"></div>
+    <div class="summary" id="summary"></div>
+    <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button id="send">Send a test callout</button>
+      <button class="ghost" id="clear">Clear log</button>
+      <button class="ghost" id="allAuto">All auto</button>
+      <span style="font-size:13px;color:var(--mute)">Asks one at a time, down the list, until someone takes it.</span>
+    </div>
+    <div id="liveNote" class="summary" style="display:none;background:#eef2fc">Scores now include your test callouts. Changing any control, or <a href="#" id="resetScores">resetting</a>, goes back to the scenario.</div>
+    <ul id="log"></ul>
+  </section>
+
+  <section class="card full" style="border-color:#b45309">
+    <h2 style="color:#b45309">Admin: set a responder back to neutral</h2>
+    <p style="margin:0 0 10px;font-size:13px;color:var(--mute)">A one-off correction for a responder whose score has sunk because they weren't reached, not because they refused. It moves one responder to 0.50 and leaves everyone else alone. In the real product this would sit behind an admin role and write an audit entry.</p>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <label>Responder <select id="adminWho"></select></label>
+      <span id="adminNow" style="font-size:14px"></span>
+      <button id="adminReset" style="background:#b45309;border-color:#b45309">Set to neutral (0.50)</button>
+    </div>
+    <ul id="audit" style="list-style:none;padding:0;margin:12px 0 0;font-size:13px"></ul>
+  </section>
+
+  <section class="card full">
+    <div class="twocol">
+      <div>
+        <h2>Vesper's pings per week</h2>
+        <svg id="chartPings" viewBox="0 0 320 160" preserveAspectRatio="none"></svg>
+        <div class="legend">
+          <span><b style="background:var(--vesper)"></b>With the fixes ticked</span>
+          <span><b style="background:#9aa3b8"></b>Today, no fixes</span>
+        </div>
+      </div>
+      <div>
+        <h2>Vesper's recent-acceptance score</h2>
+        <svg id="chartScore" viewBox="0 0 320 160" preserveAspectRatio="none"></svg>
+        <div class="legend">
+          <span><b style="background:var(--vesper)"></b>With the fixes ticked</span>
+          <span><b style="background:#9aa3b8"></b>Today, no fixes</span>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+// Weights are the real ones. Outcome mixes [taken, turned down, missed] are real, from the pings table.
+const WEIGHTS = { new:{ prox:0.60, acc:0.25, cap:0.15 }, old:{ prox:0.45, acc:0.40, cap:0.15 } };
+const people = [
+  // Today's state. prox and start are ASSUMED (the database holds neither); mixes are the real post-4.2 figures.
+  { name:'Nightwell',       prox:0.66, cap:0.70, start:0.80, mix:{ 60:[0.67,0.21,0.11] } },
+  { name:'Captain Vantage', prox:0.64, cap:0.70, start:0.70, mix:{ 60:[0.71,0.19,0.10] } },
+  { name:'The Longcast',    prox:0.60, cap:0.70, start:0.50, mix:{ 60:[0.66,0.19,0.16] } },
+  { name:'Vesper',          prox:0.62, cap:0.70, start:0.10, mix:{ 60:[0.29,0.18,0.53] } },
+];
+const PINGS_BY_RANK = [10,6,3,1];          // pings a week by list position; a 4th-placed responder gets about 1
+const CREDIT = 0.08, PENALTY = 0.12;
+const clamp = x => Math.max(0, Math.min(1, x));
+const recoveryRate = () => +document.getElementById('rate').value;
+const val = name => name === 'wait' ? '60' : 'new';   // today's rules; the fixes are the only things to change
+
+const total = (r, w) => w.prox*r.prox + w.acc*r.acc + w.cap*r.cap;
+const rankOf = (state, w) => state.slice().sort((a,b) => total(b,w)-total(a,w));
+
+// states[k] = everyone's scores after k weeks of 4.2. Every score moves from its own outcome mix.
+function simulate(wait, f1, f2, w) {
+  let st = people.map(p => ({ ...p, acc:p.start }));
+  const states = [st];
+  for (let k = 1; k <= 8; k++) {
+    const order = rankOf(st, w);
+    st = st.map(p => {
+      const pings = PINGS_BY_RANK[order.findIndex(o => o.name === p.name)];
+      const [t,d,m] = p.mix[wait];
+      let a = clamp(p.acc + pings*(t*CREDIT - (d + (f1 ? 0 : m))*PENALTY));
+      if (f2 && pings < 3 && a < 0.5) a = Math.min(0.5, a + recoveryRate());
+      return { ...p, acc:a };
+    });
+    states.push(st);
+  }
+  return states;
+}
+const vesper = st => st.find(p => p.name === 'Vesper');
+const vRank  = (st, w) => rankOf(st, w).findIndex(p => p.name === 'Vesper');
+
+const $ = id => document.getElementById(id);
+let order = [];
+people.forEach(p => { const o = document.createElement('option'); o.value = o.textContent = p.name; document.getElementById('adminWho').appendChild(o); });
+document.getElementById('adminWho').value = 'Vesper';
+let live = null;   // scores after test callouts; cleared when any control changes
+let tally = {};    // pings actually sent during test callouts, per responder
+let audit = [];    // admin resets made this session
+let forced = {};   // outcome the user has chosen per responder; absent or 'auto' means real odds
+
+const currentState = () => live || simulate(val('wait'), $('fix1').checked, $('fix2').checked, WEIGHTS[val('wt')])[+$('week').value];
+
+function updateAdmin() {
+  const name = $('adminWho').value, acc = currentState().find(p => p.name === name).acc;
+  $('adminNow').innerHTML = `Current score: <b>${acc.toFixed(2)}</b>`;
+  $('adminReset').disabled = acc === 0.5;
+  $('audit').innerHTML = audit.length
+    ? '<b>Audit trail</b>' + audit.map(a => `<li>${a.at}: ${a.name} ${a.from.toFixed(2)} to 0.50, by Admin</li>`).join('')
+    : '<span style="color:var(--mute)">No admin resets yet.</span>';
+}
+
+function render() {
+  const wait = val('wait'), w = WEIGHTS[val('wt')];
+  const f1 = $('fix1').checked, f2 = $('fix2').checked, wk = +$('week').value;
+  $('weekLabel').textContent = wk;
+  $('rateLabel').textContent = recoveryRate().toFixed(2);
+  const states = simulate(wait, f1, f2, w), state = live || states[wk];
+  order = rankOf(state, w);
+  $('liveNote').style.display = live ? 'block' : 'none';
+  $('list').innerHTML = order.map((r, i) => `
+    <div class="row ${r.name === 'Vesper' ? 'vesper' : ''}" data-name="${r.name}">
+      <span class="rank">${i+1}</span><span><b>${r.name}</b></span>
+      <span class="bar"><i style="width:${total(r, w)*100}%"></i></span>
+      <span>${r.acc.toFixed(2)}</span><span class="pill">${PINGS_BY_RANK[i]}</span>
+      <span class="pill" style="background:#eef2fc">${tally[r.name] || 0}</span>
+      <select data-force="${r.name}" aria-label="Outcome for ${r.name}">
+        ${[['auto','Auto (real odds)'],['taken','Takes it'],['turned down','Turns down'],['missed','Misses']]
+          .map(([v,l]) => `<option value="${v}" ${(forced[r.name] || 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}
+      </select></div>`).join('');
+  const rank = vRank(state, w) + 1;
+  $('summary').innerHTML = `<b>Vesper:</b> score ${vesper(state).acc.toFixed(2)}, position ${rank} of 4, about ${PINGS_BY_RANK[rank-1]} pings a week.`
+    + `<br><span style="color:var(--mute)">1 point of proximity takes ${(w.prox/w.acc).toFixed(1)} points of acceptance score to offset.</span>`;
+  drawCharts(wait, f1, f2, w, wk);
+  updateAdmin();
+}
+
+function polyline(pts, col, dash) {
+  return `<polyline fill="none" stroke="${col}" stroke-width="3" ${dash ? 'stroke-dasharray="6 5"' : ''} points="${pts.join(' ')}"/>`;
+}
+function drawCharts(wait, f1, f2, w, wk) {
+  const x = i => 20 + i*(280/8);
+  const cur = simulate(wait, f1, f2, w), base = simulate('60', false, false, w);
+  // pings per week: week k uses the ranking at the start of that week
+  const pings = cur.slice(0, 8).map(st => PINGS_BY_RANK[vRank(st, w)]);
+  const y1 = v => 130 - v*(110/15);
+  let g = '';
+  g += polyline(pings.map((v,i) => x(i)+','+y1(v)), '#c2410c');
+  g = polyline(base.slice(0, 8).map((st,i) => x(i)+','+y1(PINGS_BY_RANK[vRank(st, w)])), '#9aa3b8') + g;
+  g += `<circle cx="${x(Math.min(wk,7))}" cy="${y1(pings[Math.min(wk,7)])}" r="6" fill="#c2410c"/>`;
+  for (let i = 0; i <= 8; i++) g += `<text x="${x(i)}" y="152" font-size="10" text-anchor="middle" fill="#6b7488">${i}</text>`;
+  for (const t of [0,5,10,15]) g += `<text x="2" y="${y1(t)+3}" font-size="9" fill="#6b7488">${t}</text>`;
+  $('chartPings').innerHTML = g;
+
+  const y2 = v => 130 - v*110;
+  const c = cur.map(st => vesper(st).acc), b = base.map(st => vesper(st).acc);
+  let h = `<line x1="20" x2="300" y1="${y2(0.5)}" y2="${y2(0.5)}" stroke="#c4cad8" stroke-dasharray="4 4"/>`;
+  h += polyline(b.map((v,i) => x(i)+','+y2(v)), '#9aa3b8') + polyline(c.map((v,i) => x(i)+','+y2(v)), '#c2410c');
+  h += `<circle cx="${x(wk)}" cy="${y2(c[wk])}" r="6" fill="#c2410c"/>`;
+  for (let i = 0; i <= 8; i++) h += `<text x="${x(i)}" y="152" font-size="10" text-anchor="middle" fill="#6b7488">${i}</text>`;
+  $('chartScore').innerHTML = h;
+}
+
+// Test callout: ask down the list until someone takes it, using the selected wait's real outcome mixes.
+function sendCallout() {
+  const wait = val('wait');
+  $('send').disabled = true;
+  const li = t => { const e = document.createElement('li'); e.innerHTML = t; $('log').prepend(e); };
+  let i = 0; const n = Math.floor(Math.random()*900)+100;
+  const f1 = $('fix1').checked, results = [];
+  li(`<b>Callout #${n}, Old Town (${wait}s wait).</b> Asking in order...`);
+  // Feed the outcomes back into the scores, then re-rank for the next callout.
+  const finish = () => {
+    const base = live || simulate(wait, f1, $('fix2').checked, WEIGHTS[val('wt')])[+$('week').value];
+    live = base.map(p => {
+      let a = p.acc;
+      results.filter(r => r.name === p.name).forEach(r => {
+        if (r.out === 'taken') a += CREDIT;
+        else if (r.out === 'turned down' || !f1) a -= PENALTY;
+      });
+      return { ...p, acc:clamp(a) };
+    });
+    const moved = results.map(r => `${r.name} ${r.out === 'taken' ? '+0.08' : (r.out === 'missed' && f1 ? '0' : '-0.12')}`).join(', ');
+    li(`<i>Scores updated: ${moved}</i>`);
+    $('send').disabled = false; render();
+  };
+  const step = () => {
+    document.querySelectorAll('.row.asking').forEach(e => e.classList.remove('asking'));
+    if (i >= order.length) { li('<span class="no">Nobody took it.</span>'); finish(); return; }
+    const r = order[i++], row = document.querySelector(`.row[data-name="${r.name}"]`);
+    row.classList.add('asking');
+    const [t,d] = r.mix[wait], x = Math.random(), pick = forced[r.name];
+    const out = pick && pick !== 'auto' ? pick : x < t ? 'taken' : x < t + d ? 'turned down' : 'missed';
+    setTimeout(() => {
+      li(`${r.name}: ${out === 'taken' ? '<span class="taken">taken</span>' : '<span class="no">' + out + '</span>'}`);
+      results.push({ name:r.name, out });
+      tally[r.name] = (tally[r.name] || 0) + 1;
+      if (out === 'taken') { row.classList.remove('asking'); finish(); }
+      else step();
+    }, 650);
+  };
+  step();
+}
+
+const reset = () => { live = null; tally = {}; audit = []; render(); };
+['fix1','fix2','week','rate'].forEach(id => $(id).addEventListener('input', reset));
+$('adminWho').addEventListener('change', updateAdmin);
+$('adminReset').addEventListener('click', () => {
+  const name = $('adminWho').value, state = currentState(), from = state.find(p => p.name === name).acc;
+  if (from === 0.5) return;
+  live = state.map(p => p.name === name ? { ...p, acc:0.5 } : p);
+  audit.unshift({ at:new Date().toLocaleTimeString(), name, from });
+  const li = document.createElement('li'); li.innerHTML = `<i>Admin reset ${name} to neutral (${from.toFixed(2)} to 0.50)</i>`; $('log').prepend(li);
+  render();
+});
+$('list').addEventListener('change', e => { if (e.target.dataset.force) forced[e.target.dataset.force] = e.target.value; });
+$('allAuto').addEventListener('click', () => { forced = {}; render(); });
+$('send').addEventListener('click', sendCallout);
+$('clear').addEventListener('click', () => { $('log').innerHTML = ''; });
+// Back to the opening state: no fixes, week 0, no chosen outcomes, scores and log cleared.
+$('resetAll').addEventListener('click', () => {
+  $('fix1').checked = false; $('fix2').checked = false; $('week').value = 0; $('rate').value = 0.15;
+  forced = {}; $('log').innerHTML = '';
+  reset();
+});
+$('resetScores').addEventListener('click', e => { e.preventDefault(); reset(); });
+render();
+</script>
+</body>
+</html>

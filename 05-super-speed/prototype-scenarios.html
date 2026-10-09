@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rook Dispatch: where Vesper started falling (prototype)</title>
+<style>
+  :root { --ink:#1d2433; --mute:#6b7488; --line:#dde1ea; --bg:#f4f6fa; --card:#fff;
+          --brand:#2f4ea2; --vesper:#c2410c; --vbg:#fff4ec; --good:#15803d; --bad:#b91c1c; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.45 system-ui,Segoe UI,Arial,sans-serif; color:var(--ink); background:var(--bg); }
+  header { background:var(--ink); color:#fff; padding:12px 24px; display:flex; gap:24px; align-items:center; }
+  header b { font-size:17px; letter-spacing:.3px; }
+  header span { color:#aab3c7; font-size:13px; }
+  .note { background:#fff8db; border-bottom:1px solid #ecd98a; padding:8px 24px; font-size:13px; }
+  main { max-width:1080px; margin:20px auto; padding:0 16px; display:grid; grid-template-columns:300px 1fr; gap:16px; }
+  @media (max-width:820px){ main{ grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  h2 { margin:0 0 10px; font-size:14px; text-transform:uppercase; letter-spacing:.6px; color:var(--mute); }
+  h2.sp { margin-top:16px; }
+  label.opt { display:flex; gap:10px; align-items:flex-start; padding:8px 10px; border:1px solid var(--line);
+              border-radius:8px; margin-bottom:6px; cursor:pointer; }
+  label.opt:has(input:checked) { border-color:var(--brand); background:#eef2fc; }
+  label.opt small { display:block; color:var(--mute); }
+  input[type=range] { width:100%; }
+  .weekval { font-size:22px; font-weight:700; }
+  select { font:inherit; font-size:13px; padding:4px; border:1px solid var(--line); border-radius:6px; }
+  .row { display:grid; grid-template-columns:30px 140px 1fr 60px 70px 70px 130px; gap:10px; align-items:center;
+         padding:10px 8px; border-bottom:1px solid var(--line); transition:background .2s; }
+  .row.head { font-size:12px; color:var(--mute); text-transform:uppercase; border-bottom:2px solid var(--line); }
+  .row.vesper { background:var(--vbg); border-left:4px solid var(--vesper); }
+  .rank { font-weight:700; color:var(--mute); }
+  .bar { height:10px; background:#e8ebf3; border-radius:5px; overflow:hidden; }
+  .bar i { display:block; height:100%; background:var(--brand); transition:width .3s; }
+  .row.vesper .bar i { background:var(--vesper); }
+  .pill { font-size:12px; padding:2px 8px; border-radius:99px; background:#e8ebf3; text-align:center; }
+  .row.asking { background:#eef2fc; }
+  .row.vesper.asking { background:#ffe7d4; }
+  button { font:inherit; padding:9px 16px; border-radius:8px; border:1px solid var(--brand);
+           background:var(--brand); color:#fff; cursor:pointer; }
+  button.ghost { background:#fff; color:var(--brand); }
+  button:hover { filter:brightness(1.08); }
+  button:disabled { opacity:.5; cursor:default; }
+  #log { margin:10px 0 0; padding:0; list-style:none; font-size:13px; max-height:170px; overflow:auto; }
+  #log li { padding:4px 0; border-bottom:1px dashed var(--line); }
+  .taken { color:var(--good); font-weight:600; } .no { color:var(--bad); }
+  .summary { margin-top:12px; padding:10px 12px; border-radius:8px; background:var(--vbg); font-size:14px; }
+  svg { width:100%; height:160px; display:block; }
+  .legend { font-size:12px; color:var(--mute); display:flex; gap:16px; flex-wrap:wrap; }
+  .legend b { display:inline-block; width:14px; height:3px; vertical-align:middle; margin-right:4px; }
+  .full { grid-column:1 / -1; }
+  .twocol { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:820px){ .twocol{ grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<header><b>Rook Dispatch</b><span>Console &rsaquo; Callouts &rsaquo; Old Town &rsaquo; Who gets pinged</span></header>
+<div class="note"><b>Prototype, not live data.</b> Starting point is the real pre-4.2 picture: each responder's outcome mix and weekly pings come from the <code>pings</code> table. Proximity values and starting scores are assumptions (the database holds neither), so read the ranking as an illustration of the mechanism.</div>
+
+<main>
+  <section class="card">
+    <button id="resetAll" style="width:100%;margin-bottom:14px">Reset everything</button>
+    <h2>Ping wait</h2>
+    <label class="opt"><input type="radio" name="wait" value="90" checked>
+      <span><b>90s (pre-4.2)</b><small>Each responder behaves as they did before 4.2.</small></span></label>
+    <label class="opt"><input type="radio" name="wait" value="60">
+      <span><b>60s (4.2 today)</b><small>Each responder behaves as they have since 4.2, with Vesper missing 53%.</small></span></label>
+
+    <h2 class="sp">Ranking weights</h2>
+    <label class="opt"><input type="radio" name="wt" value="new" checked>
+      <span><b>4.2 weights</b><small>Proximity 0.60, acceptance 0.25, capability 0.15</small></span></label>
+    <label class="opt"><input type="radio" name="wt" value="old">
+      <span><b>Pre-4.2 weights</b><small>Proximity 0.45, acceptance 0.40, capability 0.15</small></span></label>
+
+    <h2 class="sp">Brief's fixes (optional)</h2>
+    <label class="opt"><input type="checkbox" id="fix1">
+      <span><b>Fix 1.</b> A miss isn't a refusal</span></label>
+    <label class="opt"><input type="checkbox" id="fix2">
+      <span><b>Fix 2.</b> Score eases back if not offered work</span></label>
+
+    <h2 class="sp">Weeks since 4.2 shipped</h2>
+    <div class="weekval"><span id="weekLabel">0</span></div>
+    <input type="range" id="week" min="0" max="8" value="0" aria-label="Weeks since 4.2 shipped">
+    <p style="font-size:13px;color:var(--mute)">Week 0 is the state just before 4.2. Drag right to watch it play out. Default is the scenario: keep the new weights, put the wait back to 90s.</p>
+  </section>
+
+  <section class="card">
+    <h2>Next Old Town callout: who is asked, in order</h2>
+    <div class="row head"><span>#</span><span>Responder</span><span>Routing score</span><span>Recent acc.</span><span>Pings / week</span><span>Sent so far</span><span>When asked</span></div>
+    <div id="list"></div>
+    <div class="summary" id="summary"></div>
+    <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button id="send">Send a test callout</button>
+      <button class="ghost" id="clear">Clear log</button>
+      <button class="ghost" id="allAuto">All auto</button>
+      <span style="font-size:13px;color:var(--mute)">Asks one at a time, down the list, until someone takes it.</span>
+    </div>
+    <div id="liveNote" class="summary" style="display:none;background:#eef2fc">Scores now include your test callouts. Changing any control, or <a href="#" id="resetScores">resetting</a>, goes back to the scenario.</div>
+    <ul id="log"></ul>
+  </section>
+
+  <section class="card full">
+    <div class="twocol">
+      <div>
+        <h2>Vesper's pings per week</h2>
+        <svg id="chartPings" viewBox="0 0 320 160" preserveAspectRatio="none"></svg>
+        <div class="legend">
+          <span><b style="background:var(--vesper)"></b>This scenario (model)</span>
+          <span><b style="background:#6b7488"></b>What actually happened (weeks 0 to 3)</span>
+        </div>
+      </div>
+      <div>
+        <h2>Vesper's recent-acceptance score</h2>
+        <svg id="chartScore" viewBox="0 0 320 160" preserveAspectRatio="none"></svg>
+        <div class="legend">
+          <span><b style="background:var(--vesper)"></b>This scenario</span>
+          <span><b style="background:#9aa3b8"></b>60s, no fixes</span>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+// Weights are the real ones. Outcome mixes [taken, turned down, missed] are real, from the pings table.
+const WEIGHTS = { new:{ prox:0.60, acc:0.25, cap:0.15 }, old:{ prox:0.45, acc:0.40, cap:0.15 } };
+const people = [
+  // prox and start are ASSUMED. Start 1.0: with the pre-4.2 mixes the score rules push everyone to the ceiling.
+  { name:'Vesper',          prox:0.70, cap:0.70, start:1.0, mix:{ 90:[0.81,0.15,0.03], 60:[0.29,0.18,0.53] } },
+  { name:'Nightwell',       prox:0.64, cap:0.70, start:1.0, mix:{ 90:[0.76,0.21,0.03], 60:[0.67,0.21,0.11] } },
+  { name:'Captain Vantage', prox:0.62, cap:0.70, start:1.0, mix:{ 90:[0.74,0.24,0.03], 60:[0.71,0.19,0.10] } },
+  { name:'The Longcast',    prox:0.60, cap:0.70, start:1.0, mix:{ 90:[0.76,0.22,0.02], 60:[0.66,0.19,0.16] } },
+];
+const PINGS_BY_RANK = [14,12,7,1];         // pre-4.2 Vesper got 13-15 a week; post-4.2 a rank-4 responder gets about 1
+const ACTUAL_VESPER = [12,5,2,1];          // real pings, weeks of 10, 17, 24, 31 Aug
+const CREDIT = 0.08, PENALTY = 0.12;
+const clamp = x => Math.max(0, Math.min(1, x));
+const val = name => document.querySelector(`input[name=${name}]:checked`).value;
+
+const total = (r, w) => w.prox*r.prox + w.acc*r.acc + w.cap*r.cap;
+const rankOf = (state, w) => state.slice().sort((a,b) => total(b,w)-total(a,w));
+
+// states[k] = everyone's scores after k weeks of 4.2. Every score moves from its own outcome mix.
+function simulate(wait, f1, f2, w) {
+  let st = people.map(p => ({ ...p, acc:p.start }));
+  const states = [st];
+  for (let k = 1; k <= 8; k++) {
+    const order = rankOf(st, w);
+    st = st.map(p => {
+      const pings = PINGS_BY_RANK[order.findIndex(o => o.name === p.name)];
+      const [t,d,m] = p.mix[wait];
+      let a = clamp(p.acc + pings*(t*CREDIT - (d + (f1 ? 0 : m))*PENALTY));
+      if (f2 && pings < 3 && a < 0.5) a = Math.min(0.5, a + 0.05);
+      return { ...p, acc:a };
+    });
+    states.push(st);
+  }
+  return states;
+}
+const vesper = st => st.find(p => p.name === 'Vesper');
+const vRank  = (st, w) => rankOf(st, w).findIndex(p => p.name === 'Vesper');
+
+const $ = id => document.getElementById(id);
+let order = [];
+let live = null;   // scores after test callouts; cleared when any control changes
+let tally = {};    // pings actually sent during test callouts, per responder
+let forced = {};   // outcome the user has chosen per responder; absent or 'auto' means real odds
+
+function render() {
+  const wait = val('wait'), w = WEIGHTS[val('wt')];
+  const f1 = $('fix1').checked, f2 = $('fix2').checked, wk = +$('week').value;
+  $('weekLabel').textContent = wk;
+  const states = simulate(wait, f1, f2, w), state = live || states[wk];
+  order = rankOf(state, w);
+  $('liveNote').style.display = live ? 'block' : 'none';
+  $('list').innerHTML = order.map((r, i) => `
+    <div class="row ${r.name === 'Vesper' ? 'vesper' : ''}" data-name="${r.name}">
+      <span class="rank">${i+1}</span><span><b>${r.name}</b></span>
+      <span class="bar"><i style="width:${total(r, w)*100}%"></i></span>
+      <span>${r.acc.toFixed(2)}</span><span class="pill">${PINGS_BY_RANK[i]}</span>
+      <span class="pill" style="background:#eef2fc">${tally[r.name] || 0}</span>
+      <select data-force="${r.name}" aria-label="Outcome for ${r.name}">
+        ${[['auto','Auto (real odds)'],['taken','Takes it'],['turned down','Turns down'],['missed','Misses']]
+          .map(([v,l]) => `<option value="${v}" ${(forced[r.name] || 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}
+      </select></div>`).join('');
+  const rank = vRank(state, w) + 1;
+  $('summary').innerHTML = `<b>Vesper:</b> score ${vesper(state).acc.toFixed(2)}, position ${rank} of 4, about ${PINGS_BY_RANK[rank-1]} pings a week.`
+    + `<br><span style="color:var(--mute)">1 point of proximity takes ${(w.prox/w.acc).toFixed(1)} points of acceptance score to offset.</span>`;
+  drawCharts(wait, f1, f2, w, wk);
+}
+
+function polyline(pts, col, dash) {
+  return `<polyline fill="none" stroke="${col}" stroke-width="3" ${dash ? 'stroke-dasharray="6 5"' : ''} points="${pts.join(' ')}"/>`;
+}
+function drawCharts(wait, f1, f2, w, wk) {
+  const x = i => 20 + i*(280/8);
+  const cur = simulate(wait, f1, f2, w), base = simulate('60', false, false, w);
+  // pings per week: week k uses the ranking at the start of that week
+  const pings = cur.slice(0, 8).map(st => PINGS_BY_RANK[vRank(st, w)]);
+  const y1 = v => 130 - v*(110/15);
+  let g = '';
+  g += polyline(pings.map((v,i) => x(i)+','+y1(v)), '#c2410c');
+  g += ACTUAL_VESPER.map((v,i) => `<circle cx="${x(i)}" cy="${y1(v)}" r="5" fill="#6b7488"/>`).join('');
+  g += `<circle cx="${x(Math.min(wk,7))}" cy="${y1(pings[Math.min(wk,7)])}" r="6" fill="#c2410c"/>`;
+  for (let i = 0; i <= 8; i++) g += `<text x="${x(i)}" y="152" font-size="10" text-anchor="middle" fill="#6b7488">${i}</text>`;
+  for (const t of [0,5,10,15]) g += `<text x="2" y="${y1(t)+3}" font-size="9" fill="#6b7488">${t}</text>`;
+  $('chartPings').innerHTML = g;
+
+  const y2 = v => 130 - v*110;
+  const c = cur.map(st => vesper(st).acc), b = base.map(st => vesper(st).acc);
+  let h = `<line x1="20" x2="300" y1="${y2(0.5)}" y2="${y2(0.5)}" stroke="#c4cad8" stroke-dasharray="4 4"/>`;
+  h += polyline(b.map((v,i) => x(i)+','+y2(v)), '#9aa3b8') + polyline(c.map((v,i) => x(i)+','+y2(v)), '#c2410c');
+  h += `<circle cx="${x(wk)}" cy="${y2(c[wk])}" r="6" fill="#c2410c"/>`;
+  for (let i = 0; i <= 8; i++) h += `<text x="${x(i)}" y="152" font-size="10" text-anchor="middle" fill="#6b7488">${i}</text>`;
+  $('chartScore').innerHTML = h;
+}
+
+// Test callout: ask down the list until someone takes it, using the selected wait's real outcome mixes.
+function sendCallout() {
+  const wait = val('wait');
+  $('send').disabled = true;
+  const li = t => { const e = document.createElement('li'); e.innerHTML = t; $('log').prepend(e); };
+  let i = 0; const n = Math.floor(Math.random()*900)+100;
+  const f1 = $('fix1').checked, results = [];
+  li(`<b>Callout #${n}, Old Town (${wait}s wait).</b> Asking in order...`);
+  // Feed the outcomes back into the scores, then re-rank for the next callout.
+  const finish = () => {
+    const base = live || simulate(wait, f1, $('fix2').checked, WEIGHTS[val('wt')])[+$('week').value];
+    live = base.map(p => {
+      let a = p.acc;
+      results.filter(r => r.name === p.name).forEach(r => {
+        if (r.out === 'taken') a += CREDIT;
+        else if (r.out === 'turned down' || !f1) a -= PENALTY;
+      });
+      return { ...p, acc:clamp(a) };
+    });
+    const moved = results.map(r => `${r.name} ${r.out === 'taken' ? '+0.08' : (r.out === 'missed' && f1 ? '0' : '-0.12')}`).join(', ');
+    li(`<i>Scores updated: ${moved}</i>`);
+    $('send').disabled = false; render();
+  };
+  const step = () => {
+    document.querySelectorAll('.row.asking').forEach(e => e.classList.remove('asking'));
+    if (i >= order.length) { li('<span class="no">Nobody took it.</span>'); finish(); return; }
+    const r = order[i++], row = document.querySelector(`.row[data-name="${r.name}"]`);
+    row.classList.add('asking');
+    const [t,d] = r.mix[wait], x = Math.random(), pick = forced[r.name];
+    const out = pick && pick !== 'auto' ? pick : x < t ? 'taken' : x < t + d ? 'turned down' : 'missed';
+    setTimeout(() => {
+      li(`${r.name}: ${out === 'taken' ? '<span class="taken">taken</span>' : '<span class="no">' + out + '</span>'}`);
+      results.push({ name:r.name, out });
+      tally[r.name] = (tally[r.name] || 0) + 1;
+      if (out === 'taken') { row.classList.remove('asking'); finish(); }
+      else step();
+    }, 650);
+  };
+  step();
+}
+
+const reset = () => { live = null; tally = {}; render(); };
+['fix1','fix2','week'].forEach(id => $(id).addEventListener('input', reset));
+document.querySelectorAll('input[name=wt], input[name=wait]').forEach(e => e.addEventListener('input', reset));
+$('list').addEventListener('change', e => { if (e.target.dataset.force) forced[e.target.dataset.force] = e.target.value; });
+$('allAuto').addEventListener('click', () => { forced = {}; render(); });
+$('send').addEventListener('click', sendCallout);
+$('clear').addEventListener('click', () => { $('log').innerHTML = ''; });
+// Back to the opening scenario: 90s wait, 4.2 weights, no fixes, week 0, no chosen outcomes, empty log.
+$('resetAll').addEventListener('click', () => {
+  document.querySelector('input[name=wait][value="90"]').checked = true;
+  document.querySelector('input[name=wt][value="new"]').checked = true;
+  $('fix1').checked = false; $('fix2').checked = false; $('week').value = 0;
+  forced = {}; $('log').innerHTML = '';
+  reset();
+});
+$('resetScores').addEventListener('click', e => { e.preventDefault(); reset(); });
+render();
+</script>
+</body>
+</html>
