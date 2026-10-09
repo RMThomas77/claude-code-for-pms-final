@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rook Dispatch 4.2: what happened, the fix, and how we stop it recurring</title>
+<style>
+  :root{
+    --bg:#0f1426; --bg2:#161d36; --card:#1c2442; --line:#2c365c; --ink:#eef1fa; --mute:#9aa5c7;
+    --brand:#6f8fff; --vesper:#ff8a4c; --good:#4fd18b; --bad:#ff6b6b; --warn:#f5c451;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;font:16px/1.55 system-ui,"Segoe UI",Arial,sans-serif;background:var(--bg);color:var(--ink)}
+  nav{position:sticky;top:0;z-index:10;display:flex;gap:4px;flex-wrap:wrap;justify-content:center;
+      padding:10px 12px;background:rgba(15,20,38,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  nav a{color:var(--mute);text-decoration:none;font-size:13px;padding:5px 11px;border-radius:99px}
+  nav a:hover{background:var(--card);color:var(--ink)}
+  section{padding:72px 20px;border-bottom:1px solid var(--line)}
+  .wrap{max-width:1040px;margin:0 auto}
+  .eyebrow{font-size:12px;letter-spacing:1.6px;text-transform:uppercase;color:var(--brand);font-weight:700;margin-bottom:10px}
+  h1{font-size:clamp(34px,6vw,60px);line-height:1.05;margin:0 0 18px;letter-spacing:-1px}
+  h2{font-size:clamp(26px,4vw,38px);line-height:1.15;margin:0 0 14px;letter-spacing:-.5px}
+  h3{margin:0 0 6px;font-size:18px}
+  p.lead{font-size:clamp(17px,2.2vw,21px);color:#cfd6ee;max-width:760px}
+  .hero{background:radial-gradient(1000px 500px at 80% -10%,#2a3a80 0%,transparent 60%),var(--bg);padding-top:90px}
+  .hl{color:var(--vesper)} .hb{color:var(--brand)}
+  .grid{display:grid;gap:16px}
+  .g4{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+  .g2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px}
+  .stat b{display:block;font-size:40px;line-height:1.1;letter-spacing:-1px}
+  .stat span{color:var(--mute);font-size:14px}
+  .stat .arrow{font-size:15px;color:var(--mute);margin-top:6px;display:block}
+  .tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;
+       padding:3px 9px;border-radius:99px;background:#26305a;color:#c3ccf0;margin-right:6px}
+  .tag.bad{background:#4a2330;color:#ffb4b4} .tag.good{background:#14412e;color:#9ef0c4} .tag.warn{background:#463a16;color:#f8dc8b}
+
+  /* changes */
+  .change{display:flex;gap:14px;align-items:center;margin:10px 0}
+  .change .from{color:var(--mute);text-decoration:line-through;min-width:110px;text-align:right}
+  .change .to{font-weight:800;font-size:22px;color:var(--vesper)}
+  .change small{color:var(--mute);display:block;font-size:13px}
+
+  /* charts */
+  .chart{width:100%;height:auto;display:block}
+  .bar{transform-origin:bottom;transform:scaleY(0);transition:transform .9s cubic-bezier(.2,.8,.2,1)}
+  .in .bar{transform:scaleY(1)}
+  .cap{font-size:13px;color:var(--mute);margin-top:8px}
+
+  /* module cards */
+  .mod{position:relative;padding-left:64px;margin-bottom:26px}
+  .mod .num{position:absolute;left:0;top:0;width:46px;height:46px;border-radius:50%;background:var(--brand);color:#0f1426;
+            display:grid;place-items:center;font-weight:800;font-size:20px}
+  .mod::before{content:"";position:absolute;left:22px;top:52px;bottom:-26px;width:2px;background:var(--line)}
+  .mod:last-child::before{display:none}
+  .mod .name{font-size:12px;letter-spacing:1.4px;text-transform:uppercase;color:var(--mute);font-weight:700}
+  .prompt{background:#0b1020;border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:10px;
+          padding:12px 14px;margin:10px 0;font-family:Consolas,"Cascadia Mono",monospace;font-size:13.5px;color:#d7defa;white-space:pre-wrap}
+  .prompt::before{content:"YOUR PROMPT";display:block;font-family:system-ui,sans-serif;font-size:10.5px;letter-spacing:1.4px;color:var(--brand);font-weight:700;margin-bottom:4px}
+  .finding{background:#15233a;border:1px solid #28406a;border-left:4px solid var(--good);border-radius:10px;padding:12px 14px;margin:10px 0}
+  .finding::before{content:"WHAT CAME BACK";display:block;font-size:10.5px;letter-spacing:1.4px;color:var(--good);font-weight:700;margin-bottom:4px}
+  .src{font-size:12px;color:var(--mute)}
+  .minibars{display:flex;gap:6px;align-items:flex-end;height:70px;margin:10px 0 2px}
+  .minibars div{flex:1;border-radius:4px 4px 0 0;min-width:10px;position:relative}
+  .minibars div i{position:absolute;top:-17px;left:0;right:0;text-align:center;font-style:normal;font-size:11px;color:var(--mute)}
+  .split{display:flex;height:26px;border-radius:7px;overflow:hidden;margin:6px 0;font-size:12px;font-weight:700;color:#0f1426}
+  .split span{display:grid;place-items:center}
+  .rules{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0}
+  .rules div{border-radius:10px;padding:10px;text-align:center;font-size:13px}
+  .rules b{display:block;font-size:26px}
+
+  /* sim */
+  .ctl{display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin-bottom:14px}
+  .ctl label{display:flex;gap:8px;align-items:center;cursor:pointer;background:#141b34;border:1px solid var(--line);padding:8px 12px;border-radius:10px;font-size:14px}
+  .ctl label:has(input:checked){border-color:var(--vesper);background:#2a1d1a}
+  input[type=range]{accent-color:var(--vesper)}
+  .ranks{display:flex;gap:10px;margin-top:10px}
+  .ranks div{flex:1;text-align:center;border-radius:10px;padding:10px 4px;background:#141b34;border:1px solid var(--line);font-size:13px;color:var(--mute)}
+  .ranks div b{display:block;font-size:22px;color:var(--ink)}
+  .ranks div.v{border-color:var(--vesper);background:#2a1d1a}
+  .ranks div.v b{color:var(--vesper)}
+  details{margin-top:16px}
+  summary{cursor:pointer;color:var(--brand);font-weight:600}
+  iframe{width:100%;height:880px;border:1px solid var(--line);border-radius:12px;background:#fff;margin-top:12px}
+  a{color:var(--brand)}
+
+  /* checks */
+  .checks{display:grid;gap:10px}
+  .chk{display:grid;grid-template-columns:30px 1fr auto;gap:12px;align-items:start;padding:12px 14px;background:var(--card);border:1px solid var(--line);border-radius:12px}
+  .chk .n{width:30px;height:30px;border-radius:50%;background:#26305a;display:grid;place-items:center;font-weight:800;font-size:14px}
+  .chk p{margin:2px 0 0;color:var(--mute);font-size:14px}
+  .res{font-size:12px;font-weight:800;letter-spacing:.8px;padding:4px 10px;border-radius:99px;white-space:nowrap}
+  .res.F{background:#4a2330;color:#ffb4b4} .res.P{background:#463a16;color:#f8dc8b} .res.O{background:#14412e;color:#9ef0c4}
+  footer{padding:40px 20px;text-align:center;color:var(--mute);font-size:13px}
+  ul.tight{margin:6px 0 0;padding-left:20px} ul.tight li{margin:4px 0}
+  @media (max-width:600px){.mod{padding-left:0}.mod .num,.mod::before{display:none}.chk{grid-template-columns:30px 1fr}.res{grid-column:2}}
+  @media (prefers-reduced-motion:reduce){.bar{transition:none}html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+
+<nav aria-label="Sections">
+  <a href="#what">What happened</a><a href="#numbers">The numbers</a><a href="#journey">The investigation</a>
+  <a href="#fix">The fix</a><a href="#skill">The skill</a><a href="#open">Still open</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero" id="top">
+  <div class="wrap">
+    <div class="eyebrow">Rook Dispatch &middot; Release 4.2 &middot; Product School lab (fictional scenario)</div>
+    <h1>We shortened a timer, and <span class="hl">four responders went silent.</span></h1>
+    <p class="lead">Release 4.2 made two routing changes on 12 August. Together with an old scoring rule, they quietly stopped Dispatch from asking some perfectly willing responders to attend callouts. This is what happened, what the evidence says, the fix I'd propose, and the habit that keeps a release like this from shipping unchecked again.</p>
+    <div class="grid g4" style="margin-top:34px">
+      <div class="card stat"><b class="hl">90s &rarr; 60s</b><span>how long a ping waits before it counts as <em>missed</em></span></div>
+      <div class="card stat"><b class="hb">0.45 &rarr; 0.60</b><span>weight on proximity in the routing score</span></div>
+      <div class="card stat"><b style="color:var(--bad)">miss = no</b><span>a missed ping costs the same 0.12 as a turn-down. Unchanged, but now it bites.</span></div>
+      <div class="card stat"><b style="color:var(--good)">2 fixes</b><span>plus a one-off reset, proposed in a clickable prototype</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- WHAT HAPPENED -->
+<section id="what">
+  <div class="wrap">
+    <div class="eyebrow">1 &middot; Plainly</div>
+    <h2>What happened with 4.2</h2>
+    <p class="lead">Dispatch ranks every available responder and asks them one at a time. A responder's rank depends on a score that goes up when they take a ping and down when they turn one down <em>or miss one</em>. Nothing else puts it back.</p>
+    <div class="grid g2" style="margin-top:26px">
+      <div class="card">
+        <h3>What 4.2 changed</h3>
+        <div class="change"><span class="from">90s wait</span><span class="to">60s</span><small>more pings count as missed</small></div>
+        <div class="change"><span class="from">0.45 distance</span><span class="to">0.60</span><small>closeness matters more in the ranking</small></div>
+        <div class="change"><span class="from">0.40 history</span><span class="to">0.25</span><small>acceptance history matters less</small></div>
+      </div>
+      <div class="card">
+        <h3>What that did, in order</h3>
+        <ol class="tight" style="padding-left:22px">
+          <li>A shorter wait means more <strong>misses</strong>, and a miss lowers a score like a refusal.</li>
+          <li>The heavier distance weight pushes the affected responders <strong>down the list</strong>.</li>
+          <li>Lower on the list means they are asked only after others say no. <strong>Few pings</strong>.</li>
+          <li>Only a <em>taken</em> ping raises a score, so with no pings there is <strong>no way back</strong>.</li>
+        </ol>
+      </div>
+    </div>
+    <p class="cap" style="margin-top:14px"><span class="tag warn">Honest status</span>This is the working hypothesis, strongly supported but not proven. Nothing in the data separates the wait from the weights, and there is no answer-time or travel-time field. Engineering needs to confirm it.</p>
+  </div>
+</section>
+
+<!-- NUMBERS -->
+<section id="numbers" style="background:var(--bg2)">
+  <div class="wrap">
+    <div class="eyebrow">2 &middot; The evidence</div>
+    <h2>The averages hid four people</h2>
+    <p class="lead">Acceptance has mostly recovered, which is why this looked like seasonality. Underneath, four responders are not coming back.</p>
+
+    <div class="grid g2" style="margin-top:26px">
+      <div class="card" id="c1">
+        <h3>Weekly acceptance rate</h3>
+        <svg class="chart" viewBox="0 0 480 240" role="img" aria-label="Weekly acceptance: six weeks at 75 to 78 percent, then 54, 66, 67, 73">
+          <g id="accBars"></g>
+        </svg>
+        <div class="cap">Weeks starting 29 Jun to 31 Aug. First six bars are the 75&ndash;78% range (drawn at 77). 4.2 shipped 12 Aug, inside the 10 Aug week.</div>
+      </div>
+      <div class="card" id="c2">
+        <h3>Vesper's pings per week</h3>
+        <svg class="chart" viewBox="0 0 480 240" role="img" aria-label="Vesper pings per week: 14, 12, 5, 2, 1">
+          <g id="vesBars"></g>
+        </svg>
+        <div class="cap">Weeks of 3, 10, 17, 24, 31 Aug. 13&ndash;15 a week before 4.2. Last taken ping: 17 Aug.</div>
+      </div>
+    </div>
+
+    <div class="grid g4" style="margin-top:16px">
+      <div class="card stat"><b>2&ndash;6 &rarr; 38</b><span>missed pings a week, before vs the 4.2 week</span><span class="arrow">then 28, 24, 21</span></div>
+      <div class="card stat"><b>5&ndash;8 &rarr; 20&ndash;32</b><span>support tickets a week</span><span class="arrow">45 of 107 post-4.2 tickets: &ldquo;gone before I could answer&rdquo; or &ldquo;few/no pings&rdquo;</span></div>
+      <div class="card stat"><b>5.5% &rarr; 11.1%</b><span>callouts where nobody took a ping</span><span class="arrow">latest week back at baseline</span></div>
+      <div class="card stat"><b>13 of 41</b><span>Old Town callouts that pinged Vesper, down from 58 of 69</span><span class="arrow">demand held; the pings moved to others</span></div>
+    </div>
+    <p class="cap" style="margin-top:14px">Did 90s &rarr; 60s help? Not on our numbers: a miss now costs 62s instead of 92s, but misses per callout rose from about 0.025 to 0.20 and seconds to the taken ping from 7.2 to 17.5. Why the wait was cut isn't written down anywhere.</p>
+  </div>
+</section>
+
+<!-- JOURNEY -->
+<section id="journey">
+  <div class="wrap">
+    <div class="eyebrow">3 &middot; The investigation, module by module</div>
+    <h2>One finding and the prompt that produced it</h2>
+    <p class="lead">Prompts are copied word for word from each module's <code>prompts.md</code>, typos included.</p>
+    <div style="margin-top:34px">
+
+      <div class="mod">
+        <div class="num">1</div>
+        <div class="name">Origin Story &middot; get oriented, test the &ldquo;it's seasonal&rdquo; theory</div>
+        <h3>Acceptance fell and only partly recovered</h3>
+        <div class="prompt">Can you pull the September data to see if volume has resolved?</div>
+        <div class="finding">Weekly acceptance was 75&ndash;78% before 4.2, fell to 54%, and was back to 73% by the week of 31 Aug. But missed pings jumped from 2&ndash;6 a week to 38, 28, 24, 21, and tickets from 5&ndash;8 to 20, 27, 32, 25. Partly recovering, not fixed, and seasonality alone doesn't explain the missed-ping jump.</div>
+        <div class="src">Tested Priya's untested view that this was &ldquo;mostly seasonal&rdquo;.</div>
+      </div>
+
+      <div class="mod">
+        <div class="num">2</div>
+        <div class="name">Super Hearing &middot; interviews versus tickets</div>
+        <h3>The people complaining weren't the people interviewed</h3>
+        <div class="prompt">Filter out the background noise (tickets that are resolved, or consistent across versions), and compare to the interviews, what key findings does the combined information tell us?</div>
+        <div class="finding">Of 147 tickets, 45 are &ldquo;gone before they could answer&rdquo; (15) or &ldquo;few/no pings&rdquo; (30). All open, none before 4.2. The 30 come from four handlers, none of whom were interviewed. Three of four interviewees mentioned callouts gone before answering, but Aunt Dot, Kip and Halloran filed no tickets, so the queue misses them.</div>
+        <div class="src">Two piles of feedback that didn't agree.</div>
+      </div>
+
+      <div class="mod">
+        <div class="num">3</div>
+        <div class="name">Rewind &middot; the numbers behind one responder</div>
+        <h3>It's routing, not demand</h3>
+        <div class="prompt">Is there any change in callout areas or other data that could impact the numbers for Vesper or others?</div>
+        <div class="finding">
+          Before 4.2 each responder was pinged on every callout in their own area. After, four stopped being pinged for their own areas: Vesper 13 of 41 Old Town callouts, first ping on only 8, down from 58 of 69. Nightwell, Captain Vantage and The Longcast took over. Callouts fell about 14% overall. The four share no area, so shared geography is ruled out.
+          <div class="split" style="margin-top:10px" aria-label="Missed share, the four: 3% before, about 49% after">
+            <span style="background:var(--good);width:3%"></span><span style="background:#3a456f;width:97%;color:#c3ccf0">before: 3% missed</span>
+          </div>
+          <div class="split" aria-label="Missed share after 4.2: about 49%">
+            <span style="background:var(--bad);width:49%">after: ~49% missed</span><span style="background:#3a456f;width:51%;color:#c3ccf0"></span>
+          </div>
+          <div class="src">The four responders' missed-ping share. The other twelve rose too, from 2% to 13%, so something global hit everyone and the four are the outliers.</div>
+        </div>
+      </div>
+
+      <div class="mod">
+        <div class="num">4</div>
+        <div class="name">X-Ray Vision &middot; reading the routing code</div>
+        <h3>There is no road back</h3>
+        <div class="prompt">Find me the part of this code that takes points off somebody when they miss a ping or turn one down. Show it to me and explain it in plain English. Then find me every single thing in this code that puts points back on.</div>
+        <div class="finding">
+          Everyone starts at 0.5. Only one thing ever raises a score, and a miss is treated as a refusal:
+          <div class="rules">
+            <div style="background:#14412e"><b style="color:var(--good)">+0.08</b>ping taken</div>
+            <div style="background:#4a2330"><b style="color:var(--bad)">&minus;0.12</b>turned down</div>
+            <div style="background:#4a2330"><b style="color:var(--bad)">&minus;0.12</b>missed</div>
+          </div>
+          Nothing lets a score drift back; an open 2019 TODO asked whether it should. A responder who isn't asked can't earn credit, so once pushed down, they stay down.
+        </div>
+        <div class="src"><code>history.py</code> in <code>00-rook/code/dispatch-routing/</code></div>
+      </div>
+
+      <div class="mod">
+        <div class="num">5</div>
+        <div class="name">Super Speed &middot; the brief and the prototype</div>
+        <h3>Recovery has to be fast, and sunk responders need a reset</h3>
+        <div class="prompt">I think we need the recovery time to be quicker, a way to reset to neutral by responder, and keep the two fixes.</div>
+        <div class="finding">At +0.05 a week it takes about 8 weeks to get Vesper back to neutral (0.5); at +0.15 about 3; at +0.25 about 2. A per-responder reset puts Vesper back in 3rd straight away. Both are written into <code>05-super-speed/brief.md</code> and tested in <code>prototype.html</code> (next section).</div>
+        <div class="src">Proximity and starting scores in the prototype are my assumptions; the outcome mixes are real.</div>
+      </div>
+
+      <div class="mod">
+        <div class="num">6</div>
+        <div class="name">Sidekicks &middot; turn the habit into a skill</div>
+        <h3>My review habit is now reusable</h3>
+        <div class="prompt">I want to save a habit as something I can reuse. When I review a brief before it goes any further, here's what I actually check for:
+- It names who owns it
+- It says how we'll know it worked
+- The scope at the end matches the scope at the start
+- It explains the problem before it proposes a fix
+- It poses any questions that may not have been answered
+
+Turn that into a skill called review-checklist, so I can point it at any brief and get the same check every time, without me explaining it again.</div>
+        <div class="finding">A project skill, <code>.claude/skills/review-checklist/SKILL.md</code>. I then added three more checks (how long the issue has been present, priority, how it became known), ran it on my own brief, and set it to run every Monday over a new <code>Briefs/</code> folder. Details in section 5.</div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- FIX -->
+<section id="fix" style="background:var(--bg2)">
+  <div class="wrap">
+    <div class="eyebrow">4 &middot; The fix, through the prototype</div>
+    <h2>Two fixes and a reset get Vesper back in the rotation</h2>
+    <p class="lead">Don't change a number quietly. Change what the score measures, and give people who are already stuck a way out.</p>
+    <div class="grid g2" style="margin-top:22px">
+      <div class="card"><span class="tag good">Fix 1</span><h3>A missed ping stops counting as a refusal</h3><p style="color:var(--mute);margin:0">A score should reflect whether someone says no, not whether they were reached in time.</p></div>
+      <div class="card"><span class="tag good">Fix 2</span><h3>A score eases back when someone wasn't offered work</h3><p style="color:var(--mute);margin:0">Toward 0.5 each week. A responder who keeps refusing still stays down. Proposed +0.15 a week.</p></div>
+    </div>
+    <div class="card" style="margin-top:16px"><span class="tag warn">One-off</span><strong>Reset the four to neutral.</strong> <span style="color:var(--mute)">A per-responder data fix, so Vesper is back in the rotation within a callout or two rather than weeks.</span></div>
+
+    <div class="card" style="margin-top:22px" id="sim">
+      <h3>Try it: Vesper over eight weeks</h3>
+      <div class="ctl">
+        <label><input type="checkbox" id="f1"> Fix 1: misses aren't refusals</label>
+        <label><input type="checkbox" id="f2"> Fix 2: score eases back</label>
+        <label><input type="checkbox" id="rs"> One-off reset to neutral</label>
+        <label>Recovery <input type="range" id="rate" min="0.05" max="0.5" step="0.05" value="0.15"> <b>+<span id="rl">0.15</span>/wk</b></label>
+      </div>
+      <svg class="chart" viewBox="0 0 640 260" id="simSvg" role="img" aria-label="Vesper's score over eight weeks"></svg>
+      <div class="ranks" id="ranks"></div>
+      <p class="cap" id="simNote"></p>
+      <p class="cap"><b>Reading it honestly:</b> the reset puts Vesper 3rd by a thin margin, and by week 2 they slip to 4th because the others keep earning credit and distance carries 0.60 of the score. The fixes stop the fall and restore a way back; they don't promise Vesper work. Real travel times decide whether neutral is enough.</p>
+      <p class="cap">A compact copy of the prototype's model (same rules, +0.08 / &minus;0.12, real outcome mixes). Proximity and starting scores are assumptions, so read it as an illustration of the mechanism, not a forecast.</p>
+    </div>
+
+    <details>
+      <summary>Open the full prototype (callout simulator, admin reset, audit trail)</summary>
+      <iframe src="05-super-speed/prototype.html" title="Full clickable prototype" loading="lazy"></iframe>
+      <p class="cap">If this doesn't load, open <a href="05-super-speed/prototype.html">05-super-speed/prototype.html</a> directly.</p>
+    </details>
+
+    <h3 style="margin-top:30px">After the two fixes</h3>
+    <ul class="tight" style="color:#cfd6ee">
+      <li>Possibly put the ping wait back to 90s. A dev should pull real answer times and replay post-4.2 callouts on 90s and the old weights separately.</li>
+      <li>Possibly ease the distance weight back toward 0.45, but only if real travel times show Vesper is far from callouts.</li>
+      <li>A console view that flags who has gone quiet and why, designed with Sofia.</li>
+      <li>Survey the quiet responders, using cover names only (Security Policy 4.1).</li>
+    </ul>
+  </div>
+</section>
+
+<!-- SKILL -->
+<section id="skill">
+  <div class="wrap">
+    <div class="eyebrow">5 &middot; Keeping it from happening again</div>
+    <h2>The review-checklist skill</h2>
+    <p class="lead">4.2 shipped changes with no stated rationale, no owner after Priya left, no success measure, and an unanswered question from Marcus on 14 August. A brief that has to pass eight checks makes those gaps visible <em>before</em> anything ships.</p>
+
+    <div class="checks" style="margin-top:26px">
+      <div class="chk"><div class="n">1</div><div><strong>Owner named</strong><p>4.2's roadmap items were all owned by Priya, who left with no handover overlap. Now orphaned.</p></div><span class="res F">FAIL on my brief</span></div>
+      <div class="chk"><div class="n">2</div><div><strong>Success measure</strong><p>No metric or date was set for the ping-wait change. Acceptance rate alone also hid the four.</p></div><span class="res P">PARTIAL</span></div>
+      <div class="chk"><div class="n">3</div><div><strong>Scope matches</strong><p>Availability Confidence was committed for 4.2 and silently slipped. Flags scope drift between start and end.</p></div><span class="res P">PARTIAL</span></div>
+      <div class="chk"><div class="n">4</div><div><strong>Problem before fix</strong><p>The wait was cut, but the problem it solved isn't written anywhere.</p></div><span class="res O">PASS</span></div>
+      <div class="chk"><div class="n">5</div><div><strong>Open questions posed</strong><p>Marcus's &ldquo;did it apply to responders already turning jobs down?&rdquo; sat unanswered.</p></div><span class="res O">PASS</span></div>
+      <div class="chk"><div class="n">6</div><div><strong>How long it's been present</strong><p>&ldquo;Since 4.2&rdquo; counts; &ldquo;recently&rdquo; doesn't.</p></div><span class="res P">PARTIAL</span></div>
+      <div class="chk"><div class="n">7</div><div><strong>Priority stated</strong><p>Priya's &ldquo;don't let it eat month one&rdquo; was the only priority signal, and it was wrong about seasonality.</p></div><span class="res F">FAIL on my brief</span></div>
+      <div class="chk"><div class="n">8</div><div><strong>How it became known</strong><p>Tickets and interviews disagreed. A claim resting on one source gets flagged.</p></div><span class="res P">PARTIAL</span></div>
+    </div>
+    <p class="cap" style="margin-top:12px">Left side of each row: what the check asks, mapped to the 4.2 gap it would have caught (my reading). Right side: the result from running the skill on my own <code>brief.md</code>.</p>
+
+    <div class="grid g2" style="margin-top:26px">
+      <div class="card">
+        <h3>Verdict on my own brief: not yet ready</h3>
+        <p style="color:var(--mute);margin:0">Fails owner and priority; partial on success measure (no metric or date), scope (the Ask holds three things, not two), duration and how it became known. It is also still over one page. The skill only reports and suggests paste-ready wording. It never edits the brief, so those fixes are still mine to apply.</p>
+      </div>
+      <div class="card">
+        <h3>Now a weekly habit</h3>
+        <ul class="tight" style="color:var(--mute)">
+          <li>Everyone puts briefs in <code>Briefs/</code> in the repo.</li>
+          <li>Scheduled task <code>review-checklist-weekly</code> reviews anything new or changed each Monday around 09:09 and sends a notification.</li>
+          <li>Runs only while the Claude app is open. First run Monday 12 Oct.</li>
+          <li>Checked a classmate's brief too: it had an owner and measures, but no stated priority.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="cap" style="margin-top:14px"><span class="tag warn">Limits</span>The skill checks the quality of a brief. It can't tell you the routing is wrong, and it only protects releases that go through a brief.</p>
+  </div>
+</section>
+
+<!-- OPEN -->
+<section id="open" style="background:var(--bg2)">
+  <div class="wrap">
+    <div class="eyebrow">6 &middot; What I'd do next</div>
+    <h2>Still open, and the ask</h2>
+    <div class="grid g2" style="margin-top:20px">
+      <div class="card">
+        <h3>Questions for engineering</h3>
+        <ul class="tight" style="color:var(--mute)">
+          <li>Did 4.2 reset scores? (They live in memory, so a restart may have.) Ask Wen Li and Marcus.</li>
+          <li>Real answer times and travel times for Vesper, Farlight, Meteor Mite and The Undertow.</li>
+          <li>A replay of post-4.2 callouts on the old settings, to separate wait from weights.</li>
+          <li>Why the wait was cut from 90s to 60s.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>For Helen</h3>
+        <ul class="tight" style="color:var(--mute)">
+          <li>Agree the two fixes, the faster recovery and the one-off reset before anyone touches code.</li>
+          <li>Confirm which squeezed-out 4.2 items (at least Availability Confidence) are still Q3 commitments.</li>
+          <li>Watch the Supply dependency: night callouts halved (13.8 to 6.5 a week), which affects low-load maintenance scheduling.</li>
+          <li>Apply the review-checklist fixes to my brief (owner, priority, measure with numbers, trim to one page).</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>Rook Industries is a fictional company. Cover identities are never linked to people. &middot; Built from CLAUDE.md and the six <code>prompts.md</code> files.</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+
+/* ---------- bar charts ---------- */
+function bars(gid, data, max, color, hi) {
+  const g = $(gid), W = 480, H = 240, top = 24, base = H - 36, n = data.length, gap = 10;
+  const bw = (W - 40 - gap*(n-1)) / n;
+  let s = `<line x1="20" x2="${W-20}" y1="${base}" y2="${base}" stroke="#2c365c"/>`;
+  data.forEach((d, i) => {
+    const h = (d.v / max) * (base - top), x = 20 + i*(bw+gap), y = base - h;
+    const c = d.c || color;
+    s += `<g><rect class="bar" x="${x}" y="${y}" width="${bw}" height="${h}" rx="4" fill="${c}" style="transition-delay:${i*90}ms"/>
+      <text x="${x+bw/2}" y="${y-6}" text-anchor="middle" font-size="12" font-weight="700" fill="#eef1fa">${d.l}</text>
+      <text x="${x+bw/2}" y="${base+16}" text-anchor="middle" font-size="11" fill="#9aa5c7">${d.x}</text></g>`;
+  });
+  g.innerHTML = s;
+}
+const grey = '#4a5788', blue = '#6f8fff', orange = '#ff8a4c', red = '#ff6b6b';
+bars('accBars', [
+  ...['29 Jun','6 Jul','13 Jul','20 Jul','27 Jul','3 Aug'].map(x => ({v:77, l:'', x:x.replace(' ',' '), c:grey})),
+  {v:54, l:'54%', x:'10 Aug', c:red}, {v:66, l:'66%', x:'17 Aug', c:orange}, {v:67, l:'67%', x:'24 Aug', c:orange}, {v:73, l:'73%', x:'31 Aug', c:blue}
+].map((d,i) => i===2 ? {...d, l:'75–78%'} : d), 100, blue);
+bars('vesBars', [
+  {v:14,l:'14',x:'3 Aug',c:grey},{v:12,l:'12',x:'10 Aug',c:orange},{v:5,l:'5',x:'17 Aug',c:orange},{v:2,l:'2',x:'24 Aug',c:red},{v:1,l:'1',x:'31 Aug',c:red}
+], 16, orange);
+const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) e.target.classList.add('in'); }), {threshold:.3});
+['c1','c2'].forEach(id => io.observe($(id)));
+
+/* ---------- compact copy of the prototype's model ---------- */
+const W_NEW = {prox:.60, acc:.25, cap:.15}, CREDIT = .08, PENALTY = .12, PINGS_BY_RANK = [10,6,3,1];
+const people = [
+  {name:'Nightwell',       prox:.66, cap:.70, start:.80, mix:[.67,.21,.11]},
+  {name:'Captain Vantage', prox:.64, cap:.70, start:.70, mix:[.71,.19,.10]},
+  {name:'The Longcast',    prox:.60, cap:.70, start:.50, mix:[.66,.19,.16]},
+  {name:'Vesper',          prox:.62, cap:.70, start:.10, mix:[.29,.18,.53]},
+];
+const clamp = x => Math.max(0, Math.min(1, x));
+const total = r => W_NEW.prox*r.prox + W_NEW.acc*r.acc + W_NEW.cap*r.cap;
+const rankOf = st => st.slice().sort((a,b) => total(b)-total(a));
+function simulate(f1, f2, reset, rate) {
+  let st = people.map(p => ({...p, acc: (reset && p.name==='Vesper') ? .5 : p.start}));
+  const out = [st];
+  for (let k = 1; k <= 8; k++) {
+    const order = rankOf(st);
+    st = st.map(p => {
+      const pings = PINGS_BY_RANK[order.findIndex(o => o.name === p.name)];
+      const [t,d,m] = p.mix;
+      let a = clamp(p.acc + pings*(t*CREDIT - (d + (f1 ? 0 : m))*PENALTY));
+      if (f2 && pings < 3 && a < .5) a = Math.min(.5, a + rate);
+      return {...p, acc:a};
+    });
+    out.push(st);
+  }
+  return out;
+}
+const sc = st => st.find(p => p.name==='Vesper').acc;
+const rk = st => rankOf(st).findIndex(p => p.name==='Vesper') + 1;
+
+function drawSim() {
+  const f1 = $('f1').checked, f2 = $('f2').checked, rs = $('rs').checked, rate = +$('rate').value;
+  $('rl').textContent = rate.toFixed(2);
+  const cur = simulate(f1, f2, rs, rate), base = simulate(false, false, false, rate);
+  const x = i => 40 + i*(580/8), y = v => 220 - v*190;
+  const line = (arr, col, dash) => `<polyline fill="none" stroke="${col}" stroke-width="3.5" ${dash?'stroke-dasharray="7 6"':''} stroke-linejoin="round" points="${arr.map((v,i)=>x(i)+','+y(v)).join(' ')}"/>`;
+  let s = `<line x1="40" x2="620" y1="${y(.5)}" y2="${y(.5)}" stroke="#4a5788" stroke-dasharray="4 5"/>
+    <text x="44" y="${y(.5)-6}" font-size="11" fill="#9aa5c7">neutral 0.5</text>`;
+  for (let i = 0; i <= 8; i++) s += `<text x="${x(i)}" y="246" text-anchor="middle" font-size="11" fill="#9aa5c7">${i===0?'today':'wk '+i}</text>`;
+  s += line(base.map(sc), '#6a74a0', true) + line(cur.map(sc), '#ff8a4c');
+  cur.forEach((st,i) => s += `<circle cx="${x(i)}" cy="${y(sc(st))}" r="5" fill="#ff8a4c"/>`);
+  s += `<text x="620" y="${y(sc(base[8]))-10}" text-anchor="end" font-size="11" fill="#9aa5c7">as it is today</text>`;
+  $('simSvg').innerHTML = s;
+  $('ranks').innerHTML = [0,2,4,8].map(i => `<div class="${i===0?'':'v'}">${i===0?'today':'week '+i}<b>#${rk(cur[i])}</b>score ${sc(cur[i]).toFixed(2)}</div>`).join('');
+  const reach = cur.findIndex(st => sc(st) >= .5);
+  $('simNote').innerHTML = !f1 && !f2 && !rs
+    ? 'Left as it is today, Vesper’s score stays near zero and they are asked last. Switch on the fixes.'
+    : `Vesper ends week 8 at position <b>${rk(cur[8])} of 4</b>, score ${sc(cur[8]).toFixed(2)}.` + (reach >= 0 ? ` Reaches neutral ${reach===0?'immediately':'in week '+reach}.` : ' Does not reach neutral within eight weeks.');
+}
+['f1','f2','rs','rate'].forEach(id => $(id).addEventListener('input', drawSim));
+drawSim();
+</script>
+</body>
+</html>
